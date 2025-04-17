@@ -1,0 +1,15 @@
+torch
+transformers
+datasets
+evaluate
+rouge_score
+nltk
+sacrebleu
+pyarrow
+pandas
+accelerate
+scipy
+scikit-learn
+tensorboard
+jax
+flax

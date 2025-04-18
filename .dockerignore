@@ -1,0 +1,22 @@
+# Byte-compiled and cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+.venv-py311/
+
+# Git
+.git/
+.gitignore
+
+# Data and logs
+data/
+logs/
+
+# Miscellaneous
+README.md
+profile_inference.py
+quantize_model.py
+train.py
+run_evaluation.py 

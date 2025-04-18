@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+*/__pycache__/
 *.py[cod]
 *$py.class
 
@@ -130,6 +131,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-py311/
 env/
 venv/
 ENV/
@@ -176,3 +178,7 @@ cython_debug/
 # Large data and model files
 data/
 models/
+
+# IDE files 
+.vscode/
+.cursor/

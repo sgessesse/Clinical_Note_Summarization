@@ -1,5 +1,9 @@
-torch
-transformers
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+transformers==4.35.2
+sentencepiece
+torch==2.0.1
+pydantic==1.10.9
 datasets
 evaluate
 rouge_score
@@ -13,3 +17,4 @@ scikit-learn
 tensorboard
 jax
 flax
+numpy<2

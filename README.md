@@ -1,67 +1,138 @@
 # Clinical Note Summarization
 
-This project aims to develop a system for summarizing clinical notes using sequence-to-sequence models. This repository currently contains the first part of the project: model training and evaluation.
+A web application that automatically generates concise summaries of clinical notes using state-of-the-art transformer models fine-tuned on clinical text data.
 
-## Project Status
+## Live Demo
 
-*   **Data Processing:** Completed.
-*   **Model Training:** Completed for BioBART and ClinicalT5 models.
-*   **Model Evaluation:** Completed, comparing the fine-tuned BioBART and ClinicalT5 models. ClinicalT5 was found to perform significantly better.
+The application is deployed and accessible at: [https://clinical-summarizer-995990015160.us-central1.run.app/](https://clinical-summarizer-995990015160.us-central1.run.app/)
 
-## Repository Structure
+**Note**: The current deployment is CPU-only for demonstration purposes, resulting in ~20 second summarization time. In a production environment with GPU support, summarization would take <1-2 seconds.
 
-*   `data_processing.py`: Script for loading the dataset (expected in Parquet format in the `data/` directory), cleaning the text, and splitting it into training, validation, and test sets.
-*   `train.py`: Script for fine-tuning sequence-to-sequence models (e.g., BioBART, ClinicalT5) on the processed data. It handles tokenization, training arguments, and saving the fine-tuned model checkpoints to the `models/` directory.
-*   `run_evaluation.py`: Script for evaluating the performance of the fine-tuned models. It loads models from the `models/` directory, generates summaries for the test set, calculates ROUGE and BLEU scores, and saves the results to `evaluation_results.csv`.
-*   `requirements.txt`: Lists the necessary Python packages for running the scripts.
-*   `evaluation_results.csv`: Contains the evaluation metrics comparing the performance of the trained models.
-*   `.gitignore`: Specifies intentionally untracked files that Git should ignore (e.g., large data files, model checkpoints).
-*   `data/`: (Ignored by Git) Directory intended to hold the input dataset (e.g., `train-*.parquet`).
-*   `models/`: (Ignored by Git) Directory where fine-tuned model checkpoints and training logs are saved.
+## Features
 
-## Setup and Usage
+- Web-based interface for easy input of clinical notes
+- Support for both text input and file upload
+- Real-time summarization with progress indicator
+- Responsive design that works on desktop and mobile devices
+- Automatic sentence segmentation for improved readability
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/sgessesse/Clinical_Note_Summarization
-    cd Clinical_Note_Summarization
-    ```
-2.  **Create and activate a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    # On Windows
-    venv\Scripts\activate
-    # On macOS/Linux
-    source venv/bin/activate
-    ```
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  **Prepare Data:** Place your clinical notes dataset (in Parquet format, e.g., `train-00000-of-00001.parquet`) inside a `data/` directory in the project root.
-5.  **Run Data Processing (if needed, usually handled by training script):** The `train.py` script typically calls the data processing functions.
-6.  **Run Training:** Modify `train.py` to specify the desired base model and training arguments, then run:
-    ```bash
-    python train.py
-    ```
-    *Note: Training requires significant computational resources (GPU recommended) and time.*
-7.  **Run Evaluation:** After training, run the evaluation script:
-    ```bash
-    python run_evaluation.py
-    ```
-    This will generate summaries, calculate metrics, print a comparison table, and save the results to `evaluation_results.csv`.
+## Technical Stack
 
-## Evaluation Results Summary
+- **Backend**: FastAPI (Python)
+- **Frontend**: HTML/CSS/JavaScript
+- **Model**: Fine-tuned ClinicalT5 for summarization
+- **Deployment**: Google Cloud Run (4GB RAM provisioned)
+- **Container**: Docker
 
-The evaluation compared fine-tuned versions of BioBART-v2-Base and ClinicalT5-Base.
+## Project Structure
 
-| Model                       | rouge1  | rouge2  | rougeL  | bleu    |
-| :-------------------------- | :------ | :------ | :------ | :------ |
-| BioBART-v2-Base (Finetuned) | 5.11    | 2.36    | 3.98    | 0.00    |
-| ClinicalT5-Base (Finetuned) | 49.32   | 32.91   | 40.26   | 27.77   |
+- `data_processing.py`: Script for loading and preprocessing the clinical notes dataset
+- `train.py`: Script for fine-tuning transformer models (BioBART and ClinicalT5)
+- `run_evaluation.py`: Script for evaluating model performance using ROUGE and BLEU metrics
+- `app/`: Directory containing the FastAPI web application
+- `models/`: Directory for storing fine-tuned model checkpoints (not included in repository)
+- `requirements.txt`: Python package dependencies
+- `Dockerfile`: Container configuration for deployment
+- `evaluation_results.csv`: Model evaluation metrics
 
-Based on these results, **ClinicalT5-Base (Finetuned)** demonstrated significantly better performance on this summarization task.
+## Model Training and Evaluation
 
-## Next Steps
+We fine-tuned two transformer models on the clinical notes summarization task:
+1. BioBART-v2-Base
+2. ClinicalT5-Base
 
-*   Model deployment: Develop an application or API to serve the best-performing model (ClinicalT5) for summarizing new clinical notes.
+The training process involved:
+1. Data preprocessing using `data_processing.py`
+2. Model fine-tuning using `train.py`
+3. Performance evaluation using `run_evaluation.py`
+
+### Evaluation Results
+
+| Model | ROUGE-1 | ROUGE-2 | ROUGE-L | BLEU |
+|-------|---------|---------|---------|------|
+| BioBART-v2-Base (Finetuned) | 5.11 | 2.36 | 3.98 | 0.00 |
+| ClinicalT5-Base (Finetuned) | 49.32 | 32.91 | 40.26 | 27.77 |
+
+Based on these results, the fine-tuned ClinicalT5 model significantly outperformed BioBART and was selected for deployment in the web application.
+
+## Local Development
+
+1. Clone the repository:
+```bash
+git clone https://github.com/sgessesse/Clinical_Note_Summarization.git
+cd Clinical_Note_Summarization
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Run the development server:
+```bash
+python -m uvicorn app.main:app --reload
+```
+
+4. Visit `http://localhost:8000` in your browser
+
+## Docker Deployment
+
+1. Build the container:
+```bash
+docker build -t clinical-summarizer .
+```
+
+2. Run locally:
+```bash
+docker run -p 8080:8080 clinical-summarizer
+```
+
+## Training Your Own Model
+
+Due to size constraints, the fine-tuned models are not included in this repository. To train your own models:
+
+1. Download the dataset from [ayush0205/clinical_notes_renamed](https://huggingface.co/datasets/ayush0205/clinical_notes_renamed)
+2. Process the data:
+```bash
+python data_processing.py
+```
+3. Fine-tune the models:
+```bash
+python train.py
+```
+4. Evaluate performance:
+```bash
+python run_evaluation.py
+```
+5. Place the best performing model in the `models/` directory
+
+## Base Models
+
+This project uses the following models as starting points for fine-tuning:
+
+- [ClinicalT5](https://huggingface.co/luqh/ClinicalT5-base) (Lu et al., 2022)
+- [BioBART](https://arxiv.org/abs/2204.03905) (Yuan et al., 2022)
+
+```bibtex
+@inproceedings{lu-etal-2022-clinicalt5,
+    title = "Clinical{T}5: A Generative Language Model for Clinical Text",
+    author = "Lu, Qiuhao and Dou, Dejing and Nguyen, Thien",
+    booktitle = "Findings of the Association for Computational Linguistics: EMNLP 2022",
+    year = "2022",
+    publisher = "Association for Computational Linguistics",
+    pages = "5436--5443",
+    address = "Abu Dhabi, United Arab Emirates"
+}
+
+@misc{BioBART,
+  title={BioBART: Pretraining and Evaluation of A Biomedical Generative Language Model},
+  author={Hongyi Yuan and Zheng Yuan and Ruyi Gan and Jiaxing Zhang and Yutao Xie and Sheng Yu},
+  year={2022},
+  eprint={2204.03905},
+  archivePrefix={arXiv}
+}
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

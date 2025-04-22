@@ -3,7 +3,9 @@ import torch
 import numpy as np
 import pandas as pd
 from datasets import Dataset
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, AutoConfig
+from transformers.modeling_flax_pytorch_utils import load_flax_checkpoint_in_pytorch_model
+from huggingface_hub import hf_hub_download
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import evaluate
@@ -11,12 +13,23 @@ import nltk
 from data_processing import load_and_split_data # To get the test set
 
 # --- Configuration ---
+BIOBART_ORIGINAL_ID = "GanjinZero/biobart-v2-base"
+CLINICALT5_ORIGINAL_ID = "luqh/ClinicalT5-base"
 BIOBART_FINETUNED_PATH = "./models/biobart_finetuned"
 CLINICALT5_FINETUNED_PATH = "./models/clinicalt5_finetuned"
 MAX_INPUT_LENGTH = 1024  # Should match training
 MAX_TARGET_LENGTH = 256 # Should match training
-EVAL_BATCH_SIZE = 8      # Can be larger for inference if VRAM allows
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Define batch sizes per model type
+EVAL_BATCH_SIZE_BIOBART = 12
+EVAL_BATCH_SIZE_CLINICALT5 = 6
+
+# Explicitly check for CUDA and print status
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+    print(f"CUDA is available. Using device: {torch.cuda.get_device_name(0)}")
+else:
+    DEVICE = torch.device("cpu")
+    print("CUDA not available. Using CPU.")
 
 # --- Setup ---
 # Ensure nltk punkt is available
@@ -33,91 +46,178 @@ bleu_metric = evaluate.load("sacrebleu")
 print("Metrics loaded.")
 
 # --- Helper Function for Evaluation ---
-def evaluate_model(model_path: str, test_dataset: Dataset):
+def evaluate_model(model_path: str, test_dataset: Dataset, eval_batch_size: int):
     """Loads a fine-tuned model and evaluates it on the test dataset."""
-    print(f"\n--- Evaluating Model: {model_path} ---")
+    print(f"\n--- Evaluating Model: {model_path} --- Batch Size: {eval_batch_size} ---")
 
     # 1. Load Model and Tokenizer
     print("Loading model and tokenizer...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
-        model.to(DEVICE)
+        # Determine if it's a T5 model
+        is_t5_model = "t5" in model_path.lower()
+        prefix = "summarize: " if is_t5_model else ""
+
+        # Load tokenizer first
+        print(f"Loading tokenizer for {model_path}...")
+        # Still need use_fast=False if sentencepiece is not installed
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+
+        # Load model
+        print(f"Loading model {model_path}...")
+        if model_path == CLINICALT5_ORIGINAL_ID:
+            # Manual loading: Config -> Empty PyTorch Model -> Load Flax Weights
+            print("Attempting manual load: Config -> PyTorch structure -> Load Flax weights...")
+            print(f"Target device for loading: {DEVICE}") # Print target device
+
+            print("Loading ClinicalT5 config...")
+            config = AutoConfig.from_pretrained(model_path)
+
+            print("Initializing PyTorch model structure...")
+            model = AutoModelForSeq2SeqLM.from_config(config)
+            # Check device immediately after initialization
+            print(f"  Model device after from_config: {model.device}")
+
+            print("Downloading Flax checkpoint...")
+            flax_checkpoint_path = hf_hub_download(repo_id=model_path, filename="flax_model.msgpack")
+
+            print("Loading Flax weights into PyTorch model...")
+            model = load_flax_checkpoint_in_pytorch_model(model, flax_checkpoint_path)
+            # Check device after loading flax weights
+            print(f"  Model device after load_flax_checkpoint: {model.device}")
+
+            print("Moving model to device...")
+            model.to(DEVICE)
+            # Add check for model device after moving
+            print(f"  Model device after model.to(DEVICE): {model.device}")
+            print("Successfully loaded ClinicalT5 model manually.")
+        else:
+            # Standard loading for PyTorch models
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+            model.to(DEVICE)
+
         model.eval() # Set model to evaluation mode
-        print("Model and tokenizer loaded.")
-    except OSError:
-        print(f"Error: Could not find saved model/tokenizer at {model_path}. Did training complete successfully?")
+        print("Model and tokenizer loaded successfully.")
+    except Exception as e:
+        print(f"Error loading model/tokenizer at {model_path}: {e}")
+        # If sentencepiece is missing, this might still fail here for the tokenizer
+        if "SentencePiece" in str(e):
+             print("\n*** ERROR: SentencePiece library not found. This is required for the ClinicalT5 tokenizer. ***")
+             print("*** Evaluation results for ClinicalT5 will be unreliable without the correct tokenizer. ***")
+             print("*** Please install SentencePiece: https://github.com/google/sentencepiece#installation ***")
         return None
 
-    # Determine prefix based on model type (heuristic)
-    prefix = "summarize: " if "t5" in model_path.lower() else ""
-
-    # 2. Preprocess Test Data (Tokenization only for input)
+    # 2. Preprocess Test Data
+    print("Tokenizing test data inputs...")
     def tokenize_inputs(examples):
+        # Add prefix for T5 models
         inputs = [prefix + doc for doc in examples["text"]]
-        model_inputs = tokenizer(inputs, max_length=MAX_INPUT_LENGTH, truncation=True, padding="max_length", return_tensors="pt")
+        
+        # Tokenize inputs
+        model_inputs = tokenizer(
+            inputs,
+            max_length=MAX_INPUT_LENGTH,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        )
+        
         return model_inputs
 
-    print("Tokenizing test data inputs...")
-    # We only need to tokenize inputs for generation; keep original summaries for reference
-    tokenized_inputs = test_dataset.map(lambda x: tokenize_inputs(x), batched=True, remove_columns=["text", "summary"])
+    tokenized_inputs = test_dataset.map(
+        tokenize_inputs,
+        batched=True,
+        remove_columns=["text", "summary"]
+    )
     tokenized_inputs.set_format("torch")
+    print("Tokenization complete.")
 
-    # Keep original summaries for comparison
-    original_summaries = test_dataset["summary"]
-
-    # 3. DataLoader
-    eval_dataloader = DataLoader(tokenized_inputs, batch_size=EVAL_BATCH_SIZE)
+    # 3. DataLoader setup
+    eval_dataloader = DataLoader(tokenized_inputs, batch_size=eval_batch_size)
 
     # 4. Generate Summaries
-    print(f"Generating summaries using device: {DEVICE}...")
+    print(f"Generating summaries on device: {DEVICE}...")
     all_preds = []
+    
     with torch.no_grad():
-        for batch in tqdm(eval_dataloader, desc="Generating"):
+        for i, batch in enumerate(tqdm(eval_dataloader, desc="Generating")):
             # Move batch to device
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
-            # Generate
+
+            # Print device for the first batch only
+            if i == 0:
+                print(f"  Input batch tensors are on device: {batch['input_ids'].device}")
+
+            # Generate with appropriate parameters for clinical summarization
             generated_ids = model.generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 max_length=MAX_TARGET_LENGTH,
-                num_beams=4, # Example beam search configuration
-                early_stopping=True
+                min_length=50,  # Increased for clinical summaries
+                num_beams=4,
+                length_penalty=1.0,  # Balanced length penalty
+                no_repeat_ngram_size=3,  # Avoid repetition
+                early_stopping=True,
+                do_sample=False,  # Deterministic generation
+                temperature=1.0,  # No temperature scaling
+                top_p=1.0  # No nucleus sampling
             )
-            # Decode and store
+            
+            # Decode predictions
             preds = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
             all_preds.extend(preds)
+    
     print("Summary generation complete.")
 
     # 5. Post-process and Calculate Metrics
     print("Calculating metrics...")
-    # Simple post-processing
+    # Get original summaries
+    original_summaries = test_dataset["summary"]
+    
+    # Post-processing
     decoded_preds = [pred.strip() for pred in all_preds]
     decoded_labels = [label.strip() for label in original_summaries]
-    decoded_labels_bleu = [[label] for label in decoded_labels] # BLEU expects list of references
+    decoded_labels_bleu = [[label] for label in decoded_labels]
 
     # ROUGE expects newline separation
     decoded_preds_rouge = ["\n".join(nltk.sent_tokenize(pred)) for pred in decoded_preds]
     decoded_labels_rouge = ["\n".join(nltk.sent_tokenize(label)) for label in decoded_labels]
 
     # Compute ROUGE
-    rouge_result = rouge_metric.compute(predictions=decoded_preds_rouge, references=decoded_labels_rouge, use_stemmer=True)
+    rouge_result = rouge_metric.compute(
+        predictions=decoded_preds_rouge,
+        references=decoded_labels_rouge,
+        use_stemmer=True
+    )
     rouge_result = {key: value * 100 for key, value in rouge_result.items()}
 
     # Compute BLEU
-    bleu_result = bleu_metric.compute(predictions=decoded_preds, references=decoded_labels_bleu)
+    bleu_result = bleu_metric.compute(
+        predictions=decoded_preds,
+        references=decoded_labels_bleu,
+        force=True # Suppress warnings about tokenized periods
+    )
     bleu_result = {"bleu": bleu_result["score"]}
 
     # Combine metrics
     result = {**rouge_result, **bleu_result}
 
     # Add mean generated length
-    prediction_lens = [len(tokenizer.encode(pred, add_special_tokens=False)) for pred in decoded_preds]
+    prediction_lens = [len(tokenizer.encode(pred)) for pred in decoded_preds]
     result["gen_len"] = np.mean(prediction_lens)
 
     final_metrics = {k: round(v, 4) for k, v in result.items()}
     print("Metrics calculation complete.")
     print(final_metrics)
+
+    # Save some example predictions for manual inspection
+    print("\nSaving example predictions for manual inspection...")
+    examples_df = pd.DataFrame({
+        'Original Text': test_dataset['text'][:5],
+        'Original Summary': test_dataset['summary'][:5],
+        'Generated Summary': decoded_preds[:5]
+    })
+    examples_df.to_csv(f"example_predictions_{model_path.replace('/', '_')}.csv", index=False)
+    print("Example predictions saved.")
 
     return final_metrics
 
@@ -137,20 +237,32 @@ if __name__ == "__main__":
 
     # 2. Define Models to Evaluate
     models_to_evaluate = [
-        {"name": "BioBART-v2-Base (Finetuned)", "path": BIOBART_FINETUNED_PATH},
-        {"name": "ClinicalT5-Base (Finetuned)", "path": CLINICALT5_FINETUNED_PATH},
+        # Original models
+        {"name": "BioBART-v2-Base (Original)", "path": BIOBART_ORIGINAL_ID, "batch_size": EVAL_BATCH_SIZE_BIOBART},
+        {"name": "ClinicalT5-Base (Original)", "path": CLINICALT5_ORIGINAL_ID, "batch_size": EVAL_BATCH_SIZE_CLINICALT5},
+        # Finetuned models
+        {"name": "BioBART-v2-Base (Finetuned)", "path": BIOBART_FINETUNED_PATH, "batch_size": EVAL_BATCH_SIZE_BIOBART},
+        {"name": "ClinicalT5-Base (Finetuned)", "path": CLINICALT5_FINETUNED_PATH, "batch_size": EVAL_BATCH_SIZE_CLINICALT5},
     ]
 
     # 3. Run Evaluation
     results = {}
+    # First load existing results from CSV if it exists
+    if os.path.exists("evaluation_results.csv"):
+        print("Loading existing results from evaluation_results.csv")
+        existing_results = pd.read_csv("evaluation_results.csv", index_col=0)
+        results = existing_results.to_dict('index')
+    else:
+        print("No existing evaluation_results.csv found.")
+
     for model_info in models_to_evaluate:
-        # Check if model directory exists before attempting evaluation
-        if os.path.isdir(model_info["path"]):
-            metrics = evaluate_model(model_info["path"], test_dataset)
-            if metrics:
-                results[model_info["name"]] = metrics
-        else:
-            print(f"Skipping evaluation for {model_info['name']}: Directory not found at {model_info['path']}")
+        metrics = evaluate_model(
+            model_info["path"],
+            test_dataset,
+            model_info["batch_size"] # Pass the specific batch size
+        )
+        if metrics:
+            results[model_info["name"]] = metrics
 
     # 4. Display Results
     print("\n--- Evaluation Results Summary ---")

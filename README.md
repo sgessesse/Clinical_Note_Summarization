@@ -48,12 +48,14 @@ The training process involved:
 
 ### Evaluation Results
 
-| Model | ROUGE-1 | ROUGE-2 | ROUGE-L | BLEU |
-|-------|---------|---------|---------|------|
-| BioBART-v2-Base (Finetuned) | 5.11 | 2.36 | 3.98 | 0.00 |
-| ClinicalT5-Base (Finetuned) | 49.32 | 32.91 | 40.26 | 27.77 |
+| Model                         | rouge1  | rouge2  | rougeL  | rougeLsum | bleu    | gen_len  |
+| :---------------------------- | :------ | :------ | :------ | :-------- | :------ | :------- |
+| BioBART-v2-Base (Original)  | 42.1308 | 23.5126 | 28.4806 | 38.7688   | 13.14   | 254.4863 |
+| BioBART-v2-Base (Finetuned) | 58.823  | 39.6999 | 47.2348 | 54.9708   | 34.4715 | 115.5956 |
+| ClinicalT5-Base (Finetuned) | 60.2571 | 42.1793 | 49.6858 | 56.5992   | 37.1784 | 132.3122 |
+| ClinicalT5-Base (Original)  | 16.2759 | 5.841   | 12.1763 | 14.5375   | 1.1683  | 45.0182  |
 
-Based on these results, the fine-tuned ClinicalT5 model significantly outperformed BioBART and was selected for deployment in the web application.
+Based on these results, the fine-tuned ClinicalT5 model significantly outperformed the other models and was selected for deployment in the web application.
 
 ## Local Development
 

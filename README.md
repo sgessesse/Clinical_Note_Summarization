@@ -6,7 +6,7 @@ A web application that automatically generates concise summaries of clinical not
 
 The application is deployed and accessible at: [https://sem-werede--clinical-summarizer-app-web-app.modal.run](https://sem-werede--clinical-summarizer-app-web-app.modal.run)
 
-**Note**: The current deployment leverages serverless GPUs via Modal, resulting in an average summarization time of ~3 seconds (a significant improvement from the previous ~20 seconds on CPU).
+**Note**: The current deployment leverages serverless GPUs via Modal, resulting in an average summarization time of ~2 seconds (a significant improvement from the previous ~20 seconds on CPU).
 
 ## Features
 

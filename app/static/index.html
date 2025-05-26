@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clinical Note Summarization</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&family=Open+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Clinical Note Summarization</h1>
+            <p class="subtitle">Leveraging advanced AI to generate concise clinical note summaries.</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <h2>Enter Clinical Note</h2>
+                <p class="instruction">Please paste the full clinical note into the text area below for summarization.</p>
+                <textarea id="text-input" rows="15" placeholder="Paste your clinical note here..."></textarea>
+                <div class="file-input-container">
+                    <label for="file-input" class="file-input-label">Or upload a .txt file:</label>
+                    <input type="file" id="file-input" accept=".txt">
+                </div>
+                <button id="summarize-button" onclick="summarize()">
+                    Summarize Note
+                </button>
+                <div id="loading-indicator" style="display:none;">
+                    <div class="spinner"></div>
+                    <span>Summarizing, please wait...</span>
+                </div>
+            </div>
+
+            <div class="output-section">
+                <h2>Generated Summary</h2>
+                <div id="summary-output-container">
+                    <pre id="summary-output" aria-live="polite">Your summary will appear here.</pre>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Clinical Note Summarizer - Open Source Project 2025</p>
+        </footer>
+    </div>
+
+    <script>
+        async function summarize() {
+            const btn = document.getElementById('summarize-button');
+            const loader = document.getElementById('loading-indicator');
+            const output = document.getElementById('summary-output');
+            const textInput = document.getElementById('text-input');
+            const fileInput = document.getElementById('file-input');
+
+            btn.disabled = true;
+            loader.style.display = 'flex';
+            output.textContent = 'Processing...';
+            let text = textInput.value;
+
+            if (fileInput.files.length > 0) {
+                try {
+                    text = await fileInput.files[0].text();
+                    textInput.value = text; // Populate textarea with file content
+                } catch (e) {
+                    output.textContent = 'Error reading file.';
+                    btn.disabled = false;
+                    loader.style.display = 'none';
+                    return;
+                }
+            }
+
+            if (!text.trim()) {
+                output.textContent = 'Input text is empty. Please paste or upload a clinical note.';
+                btn.disabled = false;
+                loader.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch('/summarize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: "Unknown error occurred" }));
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.detail || errorData.summary || "Failed to fetch summary"}`);
+                }
+
+                const data = await response.json();
+                output.textContent = data.summary || "No summary generated.";
+            } catch (error) {
+                console.error('Summarization error:', error);
+                output.textContent = `Error generating summary: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+                fileInput.value = ''; // Clear the file input
+            }
+        }
+    </script>
+</body>
+</html>

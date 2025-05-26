@@ -7,16 +7,18 @@ endpoints and a web interface for easy access.
 
 The summarization model is based on ClinicalT5 (Lu et al., 2022) and has been fine-tuned
 on a dataset of clinical notes for the specific task of summarization.
+This version attempts to use GPU if available.
 
-Author: Your Name
+Author: Semir (adapted for GPU by Roo)
 License: MIT
 """
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM # Restored imports
+import torch # Restored import
 import uvicorn
 import re
 import os
@@ -58,89 +60,52 @@ def custom_sent_tokenize(text):
 # Initialize FastAPI app
 app = FastAPI(
     title="Clinical Note Summarizer",
-    description="A web application for generating concise summaries of clinical notes",
-    version="1.0.0"
+    description="A web application for generating concise summaries of clinical notes using a fine-tuned ClinicalT5 model.",
+    version="1.1.0" # Updated version for UI changes
 )
 
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 # Model configuration
-MODEL_PATH = "models/clinicalt5_finetuned"
+MODEL_PATH = "models/clinicalt5_finetuned" # Local model path
 MAX_INPUT_LENGTH = 1024  # Maximum input length for the model
 MAX_TARGET_LENGTH = 256  # Maximum summary length
 PREFIX = "summarize: "   # T5 task prefix used during training
 
+# Removed NEW_PROMPT_TEMPLATE as it causes leakage with ClinicalT5
+
 # Initialize model and tokenizer
-device = torch.device("cpu")  # Using CPU for demo deployment
-tokenizer = AutoTokenizer.from_pretrained("luqh/ClinicalT5-base", use_fast=False)
-model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH).to(device)
+# Attempt to use GPU if available, otherwise fallback to CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
-# HTML template for the web interface
-HTML_CONTENT = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clinical Note Summarization</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }
-        textarea { width: 100%; font-size: 1em; }
-        button { padding: 10px 20px; font-size: 1em; }
-        #summary-output { white-space: pre-wrap; background: #f5f5f5; padding: 10px; border-radius: 5px; min-height: 100px; }
-        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #333; border-radius: 50%; animation: spin 1s linear infinite; margin-left: 10px; vertical-align: middle; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-    <h1>Clinical Note Summarization</h1>
-    <textarea id="text-input" rows="20" placeholder="Paste clinical note here..."></textarea><br/>
-    <input type="file" id="file-input" accept=".txt" style="margin-top:10px;"><br/>
-    <button id="summarize-button" onclick="summarize()">Summarize</button>
-    <span id="loading-indicator" style="display:none;"><div class="spinner"></div> Summarizing...</span>
-    <h2>Summary</h2>
-    <pre id="summary-output"></pre>
+try:
+    tokenizer = AutoTokenizer.from_pretrained("luqh/ClinicalT5-base", use_fast=False)
+    print(f"Loading model from: {MODEL_PATH}")
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH).to(device)
+    model.eval() # Set model to evaluation mode
+    print("ClinicalT5 model and tokenizer initialized successfully.")
+except Exception as e:
+    print(f"Error initializing ClinicalT5 model or tokenizer: {e}")
+    print(f"Please ensure the model exists at '{MODEL_PATH}' and the tokenizer 'luqh/ClinicalT5-base' is accessible.")
+    raise
 
-    <script>
-        async function summarize() {
-            const btn = document.getElementById('summarize-button');
-            const loader = document.getElementById('loading-indicator');
-            const output = document.getElementById('summary-output');
-            btn.disabled = true;
-            loader.style.display = 'inline-block';
-            output.textContent = '';
-            let text = document.getElementById('text-input').value;
-            const fileInput = document.getElementById('file-input');
-            if (fileInput.files.length > 0) {
-                text = await fileInput.files[0].text();
-                document.getElementById('text-input').value = text;
-            }
-            const response = await fetch('/summarize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text })
-            });
-            const data = await response.json();
-            output.textContent = data.summary;
-            btn.disabled = false;
-            loader.style.display = 'none';
-        }
-    </script>
-</body>
-</html>
-"""
+# HTML_CONTENT is no longer needed as we serve index.html directly
 
 class SummarizationRequest(BaseModel):
     """Request model for the summarization endpoint."""
     text: str
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_frontend():
-    """Serve the web interface."""
-    return HTML_CONTENT
+async def serve_frontend(request: Request):
+    """Serve the main web interface."""
+    return FileResponse("app/static/index.html")
 
 @app.post("/summarize")
 async def summarize(request: SummarizationRequest):
     """
-    Generate a summary for the provided clinical note.
+    Generate a summary for the provided clinical note using ClinicalT5.
     
     Args:
         request (SummarizationRequest): Request containing the text to summarize
@@ -149,32 +114,54 @@ async def summarize(request: SummarizationRequest):
         JSONResponse: Contains the generated summary
     """
     input_text = request.text or ""
+    if not input_text.strip():
+        return JSONResponse({"summary": "Input text is empty."})
+
+    # Instruction for handling contradictions, to be prepended to the note
+    contradiction_instruction = "Summarize the following clinical note comprehensively, covering key aspects such as assessment, plan, and follow-up instructions. When conflicting information exists, ensure that objective data (especially pharmacy records, lab results, imaging reports, EHR data, vital signs, and other verifiable clinical findings) is prioritized over subjective patient claims. If a contradiction is significant and cannot be resolved by this prioritization, note the contradiction. Clinical Note: "
     
-    # Tokenize input
-    inputs = tokenizer(
-        PREFIX + input_text,
-        max_length=MAX_INPUT_LENGTH,
-        truncation=True,
-        padding="max_length",
-        return_tensors="pt"
-    ).to(device)
+    # Prepend instruction to the input text
+    modified_input_text = contradiction_instruction + input_text
     
-    # Generate summary (using greedy decoding for speed)
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_length=MAX_TARGET_LENGTH,
-            num_beams=1,
-            early_stopping=True
-        )
-    
-    # Decode and format summary
-    raw_summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    sentences = custom_sent_tokenize(raw_summary)
-    summary = "\n\n".join(sentences)
-    
-    return JSONResponse({"summary": summary})
+    try:
+        # Tokenize input using the correct PREFIX for ClinicalT5
+        inputs = tokenizer(
+            PREFIX + modified_input_text, # Use modified input text
+            max_length=MAX_INPUT_LENGTH,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt"
+        ).to(device)
+        
+        # Generate summary
+        with torch.no_grad(): 
+            outputs = model.generate(
+                **inputs,
+                max_length=MAX_TARGET_LENGTH,
+                num_beams=4, 
+                early_stopping=True
+            )
+        
+        # Decode and format summary
+        raw_summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Process summary to join sentences with spaces and preserve paragraphs
+        paragraphs = raw_summary.split('\n\n')
+        processed_paragraphs = []
+        for para_text in paragraphs:
+            if para_text.strip(): # Ensure paragraph is not just whitespace
+                sentences_in_para = custom_sent_tokenize(para_text)
+                processed_paragraphs.append(" ".join(sentences_in_para))
+        
+        summary = "\n\n".join(processed_paragraphs) # Join paragraphs with double newline
+        
+        return JSONResponse({"summary": summary})
+
+    except Exception as e:
+        print(f"Error during ClinicalT5 summarization: {e}")
+        return JSONResponse({"summary": f"Error generating summary: {str(e)}"}, status_code=500)
 
 if __name__ == "__main__":
     # Run app locally for testing
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True) 
+    print("Starting FastAPI server with Uvicorn (ClinicalT5 model)...")
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

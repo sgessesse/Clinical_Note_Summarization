@@ -4,9 +4,9 @@ A web application that automatically generates concise summaries of clinical not
 
 ## Live Demo
 
-The application is deployed and accessible at: [https://clinical-summarizer-995990015160.us-central1.run.app/](https://clinical-summarizer-995990015160.us-central1.run.app/)
+The application is deployed and accessible at: [https://sem-werede--clinical-summarizer-app-web-app.modal.run](https://sem-werede--clinical-summarizer-app-web-app.modal.run)
 
-**Note**: The current deployment is CPU-only for demonstration purposes, resulting in ~20 second summarization time. In a production environment with GPU support, summarization would take <1-2 seconds.
+**Note**: The current deployment leverages serverless GPUs via Modal, resulting in an average summarization time of ~3 seconds (a significant improvement from the previous ~20 seconds on CPU).
 
 ## Features
 
@@ -21,7 +21,7 @@ The application is deployed and accessible at: [https://clinical-summarizer-9959
 - **Backend**: FastAPI (Python)
 - **Frontend**: HTML/CSS/JavaScript
 - **Model**: Fine-tuned ClinicalT5 for summarization
-- **Deployment**: Google Cloud Run (4GB RAM provisioned)
+- **Deployment**: Modal (Serverless GPU)
 - **Container**: Docker
 
 ## Project Structure
@@ -32,7 +32,8 @@ The application is deployed and accessible at: [https://clinical-summarizer-9959
 - `app/`: Directory containing the FastAPI web application
 - `models/`: Directory for storing fine-tuned model checkpoints (not included in repository)
 - `requirements.txt`: Python package dependencies
-- `Dockerfile`: Container configuration for deployment
+- `Dockerfile`: Original container configuration (primarily for local Docker testing or alternative deployments)
+- `modal_deploy.py`: Script for deploying the application to Modal with serverless GPU.
 - `evaluation_results.csv`: Model evaluation metrics
 
 ## Model Training and Evaluation
@@ -77,17 +78,40 @@ python -m uvicorn app.main:app --reload
 
 4. Visit `http://localhost:8000` in your browser
 
-## Docker Deployment
+## Modal Deployment
 
-1. Build the container:
+The application is deployed using [Modal](https://modal.com) for serverless GPU execution.
+
+1. **Install Modal Client**:
+   ```bash
+   pip install modal
+   ```
+2. **Setup Modal Token**:
+   ```bash
+   modal setup
+   ```
+   (This will open a browser for authentication)
+3. **Deploy the Application**:
+   Navigate to the project root directory and run:
+   ```bash
+   modal deploy modal_deploy.py
+   ```
+   Modal will provide a URL for the deployed application.
+
+## Local Docker Testing (Optional)
+
+If you wish to run the application locally using Docker (without Modal's serverless GPU benefits):
+
+1. Build the container (ensure `Dockerfile` is configured for CPU execution if not using a GPU-enabled Docker setup):
 ```bash
 docker build -t clinical-summarizer .
 ```
 
 2. Run locally:
 ```bash
-docker run -p 8080:8080 clinical-summarizer
+docker run -p 8000:8000 clinical-summarizer
 ```
+(Note: The port in `Dockerfile` might need to be 8000 to match `app/main.py`'s Uvicorn default if not overridden)
 
 ## Training Your Own Model
 
